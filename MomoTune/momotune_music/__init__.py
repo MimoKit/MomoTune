@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 
@@ -14,10 +15,18 @@ from gsuid_core.segment import MessageSegment
 from gsuid_core.sv import SV
 
 from ..momotune_config import MOMOTUNE_CONFIG
+from .qq_source import (
+    QqSource,
+    clear_credential as qq_clear_credential,
+    create_qr_login,
+    has_login as qq_has_login,
+    wait_qr_login,
+)
 from .render import render_song_card
 from .sources import (
     KUGOU,
     NCM,
+    QQ,
     BaseSource,
     KugouSource,
     MusicSource,
@@ -103,6 +112,10 @@ class SourceRegistry:
                     settings.kugou_cookie,
                     settings.quality,
                     cover_size=profile.kugou_cover_size,
+                ),
+                QQ: QqSource(
+                    settings.quality,
+                    cover_size=profile.qq_cover_size,
                 ),
             }
             self._fingerprint = fingerprint
@@ -213,7 +226,7 @@ async def _handle_song_request(bot: Bot, ev: Event, source_name: MusicSource) ->
     settings, sources = _REGISTRY.snapshot()
     source = sources[source_name]
     raw = ev.text.strip()
-    command = ev.command or ("酷狗点歌" if source_name == KUGOU else "点歌")
+    command = ev.command or {KUGOU: "酷狗点歌", QQ: "QQ点歌"}.get(source_name, "点歌")
     if not raw:
         await bot.send(f"请输入歌名，例如：{command} 晴天")
         return
@@ -260,9 +273,11 @@ async def _handle_song_request(bot: Bot, ev: Event, source_name: MusicSource) ->
 
 music_sv = SV("MomoTune点歌", priority=5, area="ALL")
 pick_sv = SV("MomoTune选歌", priority=15, area="ALL")
+auth_sv = SV("MomoTune管理", priority=5, area="ALL")
 
 NCM_COMMANDS = ("点歌", "唱歌", "来一首")
 KUGOU_COMMANDS = ("酷狗点歌", "酷狗唱歌", "酷狗来一首")
+QQ_COMMANDS = ("QQ点歌", "QQ唱歌", "QQ来一首", "qq点歌")
 
 
 @music_sv.on_command(
@@ -283,6 +298,83 @@ async def kugou_song(bot: Bot, ev: Event) -> None:
     await _handle_song_request(bot, ev, KUGOU)
 
 
+@music_sv.on_command(
+    QQ_COMMANDS,
+    block=True,
+    prefix=False,
+)
+async def qq_song(bot: Bot, ev: Event) -> None:
+    await _handle_song_request(bot, ev, QQ)
+
+
+async def _wait_qq_login(bot: Bot, client: object, session: object) -> None:
+    """后台等待扫码结果并主动通知（GsCore user_pm==1 为超级用户）。"""
+    try:
+        await wait_qr_login(client, session)
+    except asyncio.TimeoutError:
+        await bot.send("QQ音乐登录超时，二维码已失效，请重新发送「QQ音乐登录」。")
+    except Exception as exc:
+        logger.warning(f"[MomoTune] QQ音乐扫码登录失败: {exc}")
+        if "超时" in str(exc):
+            await bot.send("QQ音乐登录二维码已超时失效，请重新发送「QQ音乐登录」。")
+        elif "拒绝" in str(exc):
+            await bot.send("已取消 QQ音乐登录（扫码被拒绝）。")
+        else:
+            await bot.send(f"QQ音乐登录失败：{exc}，请稍后重试。")
+    else:
+        await bot.send("QQ音乐会员登录成功，现在可以用「QQ点歌」发送语音了。")
+
+
+@auth_sv.on_command(
+    ("QQ音乐登录", "QQ音乐登陆", "qq音乐登录"),
+    block=True,
+    prefix=False,
+)
+async def qq_login(bot: Bot, ev: Event) -> None:
+    if ev.user_pm != 1:
+        await bot.send("仅超级用户可以登录 QQ音乐会员账号。")
+        return
+    login_type = (ev.text.strip().lower() or "qq")
+    if login_type not in ("qq", "wx", "mobile"):
+        await bot.send("登录方式仅支持 qq / wx / mobile，例如：QQ音乐登录 wx")
+        return
+    await bot.send(f"正在获取{'微信' if login_type == 'wx' else 'QQ'}扫码登录二维码，请在 3 分钟内完成扫码…")
+    try:
+        client, session, qr_png = await create_qr_login(login_type)
+    except SourceError as exc:
+        await bot.send(str(exc))
+        return
+    except Exception as exc:
+        logger.warning(f"[MomoTune] 创建 QQ音乐扫码会话失败: {exc}")
+        await bot.send(f"获取登录二维码失败：{exc}")
+        return
+    await bot.send(MessageSegment.image(qr_png))
+    asyncio.create_task(_wait_qq_login(bot, client, session))
+
+
+@auth_sv.on_fullmatch(
+    ("QQ音乐退出", "QQ音乐登出", "qq音乐退出"),
+    block=True,
+    prefix=False,
+)
+async def qq_logout(bot: Bot, ev: Event) -> None:
+    if ev.user_pm != 1:
+        await bot.send("仅超级用户可以清除 QQ音乐登录态。")
+        return
+    qq_clear_credential()
+    await bot.send("已清除 QQ音乐登录态。")
+
+
+@auth_sv.on_fullmatch(
+    ("QQ音乐状态", "qq音乐状态"),
+    block=True,
+    prefix=False,
+)
+async def qq_status(bot: Bot, ev: Event) -> None:
+    status = "已登录会员账号（QQ音乐语音点歌可用）" if qq_has_login() else "未登录（QQ音乐语音点歌需超级用户发送「QQ音乐登录」）"
+    await bot.send(f"MomoTune · QQ音乐状态：{status}。")
+
+
 @pick_sv.on_message(prefix=False)
 async def pick_song(bot: Bot, ev: Event) -> None:
     text = ev.raw_text.strip()
@@ -301,7 +393,7 @@ async def pick_song(bot: Bot, ev: Event) -> None:
     await _play_song(bot, ev, song, sources[song.source], settings.render_quality)
 
 
-logger.info("[MomoTune] 网易云 / 酷狗点歌触发器已注册")
+logger.info("[MomoTune] 网易云 / 酷狗 / QQ音乐点歌触发器已注册")
 
 
 # ─── AI Core 工具集成 ──────────────────────────────────────────────────────────
@@ -316,6 +408,7 @@ try:
         covers=[
             "网易云音乐点歌与歌曲播放",
             "酷狗音乐点歌与歌曲播放",
+            "QQ音乐点歌与歌曲播放",
             "按歌名或歌手播放歌曲音频与卡片",
             "根据用户需求点播音乐",
         ],
@@ -324,6 +417,7 @@ try:
             "音乐·播放歌曲",
             "音乐·网易云放歌",
             "音乐·酷狗放歌",
+            "音乐·QQ音乐放歌",
         ],
         context_tags=["音乐", "点歌", "娱乐"],
     )
@@ -337,9 +431,9 @@ try:
 当用户要求点歌、放歌、听歌、来一首歌、或希望播放某位歌手的特定歌曲时调用。
 
 Args:
-    song_name: 歌曲名称或关键词，例如“晴天”、“海阔天空”。若已知网易云歌曲ID也可直接填入数字ID（如“347230”）。
+    song_name: 歌曲名称或关键词，例如“晴天”、“海阔天空”。若已知网易云歌曲ID也可直接填入数字ID（如“347230”，仅限网易云）。
     artist: 可选，歌手名称，例如“周杰伦”、“陈奕迅”，用于更精准命中。
-    source: 音乐平台源，"ncm"（网易云音乐，默认）或 "kugou"（酷狗音乐）。
+    source: 音乐平台源，"ncm"（网易云音乐，默认）、"kugou"（酷狗音乐）或 "qq"（QQ音乐，需管理员扫码登录会员账号）。
 
 Returns:
     播放状态说明。若成功，卡片与音频已直接发送给用户；AI 无需再重复发送音频，可直接自然回复用户。
@@ -349,7 +443,13 @@ Returns:
         if bot is None or ev is None:
             return "错误：当前会话上下文缺失，无法发送音乐。"
 
-        src_name = KUGOU if source.lower() in ("kugou", "kg", "酷狗") else NCM
+        src_lower = source.lower()
+        if src_lower in ("kugou", "kg", "酷狗"):
+            src_name: MusicSource = KUGOU
+        elif src_lower in ("qq", "qqmusic", "tencent", "QQ音乐", "腾讯"):
+            src_name = QQ
+        else:
+            src_name = NCM
         settings, sources = _REGISTRY.snapshot()
         source_obj = sources[src_name]
 
