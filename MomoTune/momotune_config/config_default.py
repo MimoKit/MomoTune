@@ -28,6 +28,16 @@ CONFIG_DEFAULT: Dict[str, GSC] = {
         data="exhigh",
         options=["standard", "higher", "exhigh", "lossless", "hires", "jyeffect", "sky", "jymaster"],
     ),
+    "render_quality": GsStrConfig(
+        title="卡片渲染清晰度",
+        desc=(
+            "default=标准（96DPI，封面240px，渲染快）；"
+            "high=高清（192DPI 2倍图，封面480px，手机端更清晰，渲染耗时与内存略增）；"
+            "ultra=超高清（288DPI 3倍图，列表卡片约4.5MB以内，渲染耗时与内存明显增加）"
+        ),
+        data="default",
+        options=["default", "high", "ultra"],
+    ),
     "ncm_cookie": GsStrConfig(
         title="网易云 Cookie",
         desc="可选；推荐在 NCM-plugin 后端配置，插件侧留空即可",
