@@ -25,6 +25,7 @@ from .sources import (
     Song,
     SourceError,
     download,
+    get_render_profile,
 )
 
 PENDING_TTL_SECONDS = 300.0
@@ -38,6 +39,7 @@ class TuneSettings:
     quality: str
     ncm_cookie: str
     kugou_cookie: str
+    render_quality: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +68,7 @@ def _settings() -> TuneSettings:
         quality=_setting_text("ncm_quality", "exhigh"),
         ncm_cookie=_setting_text("ncm_cookie", ""),
         kugou_cookie=_setting_text("ncm_kugou_cookie", ""),
+        render_quality=_setting_text("render_quality", "default").strip().lower(),
     )
 
 
@@ -73,7 +76,7 @@ class SourceRegistry:
     """配置变更后自动重建 source，同时保留酷狗 dfid。"""
 
     def __init__(self) -> None:
-        self._fingerprint: tuple[str, str, str, str, str] | None = None
+        self._fingerprint: tuple[str, str, str, str, str, str] | None = None
         self._sources: dict[MusicSource, BaseSource] = {}
 
     def snapshot(self) -> tuple[TuneSettings, dict[MusicSource, BaseSource]]:
@@ -84,11 +87,23 @@ class SourceRegistry:
             settings.quality,
             settings.ncm_cookie,
             settings.kugou_cookie,
+            settings.render_quality,
         )
         if fingerprint != self._fingerprint:
+            profile = get_render_profile(settings.render_quality)
             self._sources = {
-                NCM: NcmSource(settings.ncm_api_base, settings.ncm_cookie, settings.quality),
-                KUGOU: KugouSource(settings.kugou_api_base, settings.kugou_cookie, settings.quality),
+                NCM: NcmSource(
+                    settings.ncm_api_base,
+                    settings.ncm_cookie,
+                    settings.quality,
+                    cover_size=profile.ncm_cover_size,
+                ),
+                KUGOU: KugouSource(
+                    settings.kugou_api_base,
+                    settings.kugou_cookie,
+                    settings.quality,
+                    cover_size=profile.kugou_cover_size,
+                ),
             }
             self._fingerprint = fingerprint
         return settings, self._sources
@@ -142,7 +157,13 @@ def _merge_detail(song: Song, detail: Song | None) -> Song:
     )
 
 
-async def _play_song(bot: Bot, ev: Event, song: Song, source: BaseSource) -> tuple[bool, str]:
+async def _play_song(
+    bot: Bot,
+    ev: Event,
+    song: Song,
+    source: BaseSource,
+    render_quality: str = "default",
+) -> tuple[bool, str]:
     try:
         play_url = await source.play_url(song)
     except SourceError as exc:
@@ -171,6 +192,7 @@ async def _play_song(bot: Bot, ev: Event, song: Song, source: BaseSource) -> tup
             [song],
             title="正在播放",
             hint=f"{source.label} · MomoTune 为你选中的旋律",
+            quality=render_quality,
         )
         await bot.send(MessageSegment.image(card))
     except (OSError, RuntimeError, httpx.HTTPError) as exc:
@@ -198,7 +220,7 @@ async def _handle_song_request(bot: Bot, ev: Event, source_name: MusicSource) ->
 
     if source_name == NCM and raw.isdigit():
         _clear_pending(ev)
-        await _play_song(bot, ev, Song(source=NCM, song_id=raw), source)
+        await _play_song(bot, ev, Song(source=NCM, song_id=raw), source, settings.render_quality)
         return
 
     try:
@@ -216,7 +238,7 @@ async def _handle_song_request(bot: Bot, ev: Event, source_name: MusicSource) ->
         return
     if len(results) == 1:
         _clear_pending(ev)
-        await _play_song(bot, ev, results[0], source)
+        await _play_song(bot, ev, results[0], source, settings.render_quality)
         return
 
     try:
@@ -224,6 +246,7 @@ async def _handle_song_request(bot: Bot, ev: Event, source_name: MusicSource) ->
             results,
             title=f"{source.label}点歌候选",
             hint=f"回复数字 1～{len(results)} 播放对应曲目 · 选择在 {PENDING_TTL_SECONDS // 60:.0f} 分钟内有效",
+            quality=settings.render_quality,
         )
     except (OSError, RuntimeError, httpx.HTTPError) as exc:
         logger.warning(f"[MomoTune] 渲染搜索结果失败: {exc}")
@@ -274,8 +297,8 @@ async def pick_song(bot: Bot, ev: Event) -> None:
         return
     song = pending[choice - 1]
     _clear_pending(ev)
-    _, sources = _REGISTRY.snapshot()
-    await _play_song(bot, ev, song, sources[song.source])
+    settings, sources = _REGISTRY.snapshot()
+    await _play_song(bot, ev, song, sources[song.source], settings.render_quality)
 
 
 logger.info("[MomoTune] 网易云 / 酷狗点歌触发器已注册")
@@ -336,7 +359,9 @@ Returns:
 
         # 1. 网易云纯数字 ID 直接播放
         if src_name == NCM and clean_name.isdigit():
-            ok, info = await _play_song(bot, ev, Song(source=NCM, song_id=clean_name), source_obj)
+            ok, info = await _play_song(
+                bot, ev, Song(source=NCM, song_id=clean_name), source_obj, settings.render_quality
+            )
             if ok:
                 return f"已成功为用户播放网易云歌曲（ID: {clean_name}）。歌曲卡片与音频已发送到聊天中。"
             return f"播放失败：{info}"
@@ -364,7 +389,7 @@ Returns:
                     break
 
         # 4. 执行播放并发送
-        ok, info = await _play_song(bot, ev, best_song, source_obj)
+        ok, info = await _play_song(bot, ev, best_song, source_obj, settings.render_quality)
         if ok:
             return f"已成功为用户播放歌曲：《{best_song.name}》- {best_song.artist}（来源：{source_obj.label}）。歌曲卡片与音频语音已直接发送给用户，AI 可以在对话中告知用户歌曲已送达。"
         return f"找到歌曲《{best_song.name}》- {best_song.artist}，但在播放时失败：{info}"

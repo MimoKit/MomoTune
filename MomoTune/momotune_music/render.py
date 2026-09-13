@@ -11,7 +11,7 @@ import httpx
 
 from gsuid_core.utils.html_render import _ensure_renderer, render_html_to_bytes
 
-from .sources import Song
+from .sources import Song, get_render_profile
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "templates" / "search_list.html"
 FONT_PATH = Path(__file__).resolve().parents[2] / "resources" / "fonts" / "LXGWWenKai-Regular.ttf"
@@ -70,8 +70,10 @@ async def render_song_card(
     *,
     title: str,
     hint: str,
+    quality: str = "default",
 ) -> bytes:
     """渲染搜索列表或单曲信息卡片。"""
+    profile = get_render_profile(quality)
     if FONT_PATH.is_file():
         _ensure_renderer(extra_fonts=[(FONT_PATH.read_bytes(), FONT_NAME)])
     async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
@@ -85,8 +87,8 @@ async def render_song_card(
     return await render_html_to_bytes(
         html,
         max_width=680,
-        dpi=96,
-        default_font_size=15,
+        dpi=profile.dpi,
+        default_font_size=profile.font_size,
         font_name=FONT_NAME,
         allow_refit=True,
         image_format="png",

@@ -19,6 +19,34 @@ SOURCE_LABELS: dict[MusicSource, str] = {NCM: "网易云", KUGOU: "酷狗"}
 
 HTTP_TIMEOUT = 12.0
 DOWNLOAD_MAX_BYTES = 15 * 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class RenderProfile:
+    """卡片渲染清晰度档位。
+
+    ncm_cover_size 为 None 时保持接口原始封面 URL，不追加尺寸参数。
+    """
+
+    key: str
+    dpi: int
+    font_size: int
+    ncm_cover_size: int | None
+    kugou_cover_size: int
+
+
+QUALITY_PROFILES: dict[str, RenderProfile] = {
+    "default": RenderProfile("default", dpi=96, font_size=15, ncm_cover_size=None, kugou_cover_size=240),
+    "high": RenderProfile("high", dpi=192, font_size=16, ncm_cover_size=480, kugou_cover_size=480),
+    "ultra": RenderProfile("ultra", dpi=288, font_size=15, ncm_cover_size=512, kugou_cover_size=480),
+}
+
+
+def get_render_profile(key: str) -> RenderProfile:
+    profile = QUALITY_PROFILES.get((key or "").strip().lower())
+    return profile if profile is not None else QUALITY_PROFILES["default"]
+
+
 _NCM_TO_KUGOU_QUALITY: dict[str, str] = {
     "standard": "128",
     "higher": "320",
@@ -126,10 +154,11 @@ def _song(
 class BaseSource:
     name: MusicSource
 
-    def __init__(self, base: str, cookie: str, quality: str) -> None:
+    def __init__(self, base: str, cookie: str, quality: str, cover_size: int | None = None) -> None:
         self.base = base.rstrip("/")
         self.cookie = cookie.strip()
         self.quality = quality
+        self.cover_size = cover_size
 
     @property
     def label(self) -> str:
@@ -155,11 +184,20 @@ class BaseSource:
         return None
 
 
+def _resize_ncm_cover(url: object, size: int | None) -> object | None:
+    """按档位给网易云封面追加 / 替换尺寸参数；size 为 None 时保持原 URL。"""
+    if not size or not isinstance(url, str) or not url:
+        return url
+    param = f"{size}y{size}"
+    if "?param=" in url:
+        return url.split("?param=", 1)[0] + f"?param={param}"
+    return f"{url}?param={param}"
+
+
 class NcmSource(BaseSource):
     name = NCM
 
-    @staticmethod
-    def _parse(raw: object) -> Song | None:
+    def _parse(self, raw: object) -> Song | None:
         if not isinstance(raw, dict):
             return None
         data = _object(raw, "网易云歌曲数据格式异常。")
@@ -176,7 +214,7 @@ class NcmSource(BaseSource):
             _field(data, "name"),
             artist,
             _field(album, "name"),
-            _field(album, "picUrl"),
+            _resize_ncm_cover(_field(album, "picUrl"), self.cover_size),
             _first(data, "dt", "duration"),
             {"fee": _text(_field(data, "fee"))},
         )
@@ -214,8 +252,8 @@ class NcmSource(BaseSource):
 class KugouSource(BaseSource):
     name = KUGOU
 
-    def __init__(self, base: str, cookie: str, quality: str) -> None:
-        super().__init__(base, cookie, quality)
+    def __init__(self, base: str, cookie: str, quality: str, cover_size: int | None = None) -> None:
+        super().__init__(base, cookie, quality, cover_size)
         self._dfid: str | None = None
         self._dfid_lock = asyncio.Lock()
 
@@ -244,8 +282,7 @@ class KugouSource(BaseSource):
     def _clean(value: object | None) -> str:
         return _text(value).replace("<em>", "").replace("</em>", "").strip()
 
-    @classmethod
-    def _parse(cls, raw: object) -> Song | None:
+    def _parse(self, raw: object) -> Song | None:
         if not isinstance(raw, dict):
             return None
         data = _object(raw, "酷狗歌曲数据格式异常。")
@@ -253,9 +290,9 @@ class KugouSource(BaseSource):
         if song_hash is None:
             return None
         seconds = _first(data, "Duration", "duration")
-        pic = cls._clean(_first(data, "Image", "sizable_cover", "img"))
+        pic = self._clean(_first(data, "Image", "sizable_cover", "img"))
         if pic:
-            pic = pic.replace("{size}", "240")
+            pic = pic.replace("{size}", str(self.cover_size or 240))
         extra: dict[str, str] = {}
         album_id = _text(_first(data, "AlbumID", "album_id"))
         album_audio_id = _text(_first(data, "album_audio_id", "AlbumAudioID", "mixsongid"))
@@ -266,9 +303,9 @@ class KugouSource(BaseSource):
         return _song(
             KUGOU,
             song_hash,
-            cls._clean(_first(data, "SongName", "OriSongName", "filename")),
-            cls._clean(_first(data, "SingerName", "singername")),
-            cls._clean(_first(data, "AlbumName", "albumname")),
+            self._clean(_first(data, "SongName", "OriSongName", "filename")),
+            self._clean(_first(data, "SingerName", "singername")),
+            self._clean(_first(data, "AlbumName", "albumname")),
             pic,
             (_integer(seconds) or 0) * 1000,
             extra,
