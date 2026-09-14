@@ -24,11 +24,11 @@ from .qq_source import (
 )
 from .render import render_song_card
 from .sources import (
-    KUGOU,
+    # KUGOU,
     NCM,
     QQ,
     BaseSource,
-    KugouSource,
+    # KugouSource,
     MusicSource,
     NcmSource,
     Song,
@@ -107,12 +107,14 @@ class SourceRegistry:
                     settings.quality,
                     cover_size=profile.ncm_cover_size,
                 ),
-                KUGOU: KugouSource(
-                    settings.kugou_api_base,
-                    settings.kugou_cookie,
-                    settings.quality,
-                    cover_size=profile.kugou_cover_size,
-                ),
+
+# --- 酷狗音源注册（已注释） ---
+                # KUGOU: KugouSource(
+                    # settings.kugou_api_base,
+                    # settings.kugou_cookie,
+                    # settings.quality,
+                    # cover_size=profile.kugou_cover_size,
+                # ),
                 QQ: QqSource(
                     settings.quality,
                     cover_size=profile.qq_cover_size,
@@ -236,7 +238,7 @@ async def _handle_song_request(bot: Bot, ev: Event, source_name: MusicSource) ->
     settings, sources = _REGISTRY.snapshot()
     source = sources[source_name]
     raw = ev.text.strip()
-    command = ev.command or {KUGOU: "酷狗点歌", QQ: "QQ点歌"}.get(source_name, "点歌")
+    command = ev.command or {QQ: "QQ点歌"}.get(source_name, "点歌")
     if not raw:
         await bot.send(f"请输入歌名，例如：{command} 晴天")
         return
@@ -286,7 +288,10 @@ pick_sv = SV("MomoTune选歌", priority=15, area="ALL")
 auth_sv = SV("MomoTune管理", priority=5, area="ALL")
 
 NCM_COMMANDS = ("点歌", "唱歌", "来一首")
-KUGOU_COMMANDS = ("酷狗点歌", "酷狗唱歌", "酷狗来一首")
+
+# --- 酷狗命令（已注释） ---
+# KUGOU_COMMANDS = ("酷狗点歌", "酷狗唱歌", "酷狗来一首")
+
 QQ_COMMANDS = ("QQ点歌", "QQ唱歌", "QQ来一首", "qq点歌")
 
 
@@ -299,13 +304,14 @@ async def ncm_song(bot: Bot, ev: Event) -> None:
     await _handle_song_request(bot, ev, NCM)
 
 
-@music_sv.on_command(
-    KUGOU_COMMANDS,
-    block=True,
-    prefix=False,
-)
-async def kugou_song(bot: Bot, ev: Event) -> None:
-    await _handle_song_request(bot, ev, KUGOU)
+# --- 酷狗点歌命令（已注释） ---
+# @music_sv.on_command(
+#     KUGOU_COMMANDS,
+#     block=True,
+#     prefix=False,
+# )
+# async def kugou_song(bot: Bot, ev: Event) -> None:
+#     await _handle_song_request(bot, ev, KUGOU)
 
 
 @music_sv.on_command(
@@ -315,6 +321,87 @@ async def kugou_song(bot: Bot, ev: Event) -> None:
 )
 async def qq_song(bot: Bot, ev: Event) -> None:
     await _handle_song_request(bot, ev, QQ)
+
+
+MIXED_COMMANDS = ("双源点歌", "合并点歌", "综合点歌")
+
+
+async def _handle_mixed_search(bot: Bot, ev: Event) -> None:
+    """网易云 + QQ 音乐双源并发搜索，各取 5 条交替排列共 10 条候选。"""
+    settings, sources = _REGISTRY.snapshot()
+    ncm_source = sources.get(NCM)
+    qq_source = sources.get(QQ)
+    raw = ev.text.strip()
+    if not raw:
+        await bot.send("请输入歌名，例如：双源点歌 晴天")
+        return
+
+    async def _search(src: BaseSource) -> list[Song]:
+        try:
+            return await src.search(raw, 5)
+        except SourceError as exc:
+            logger.warning(f"[MomoTune] {src.label}混合搜索失败: {exc}")
+            return []
+        except httpx.HTTPError as exc:
+            logger.warning(f"[MomoTune] {src.label}混合搜索失败: {exc}")
+            return []
+
+    ncm_results: list[Song] = []
+    qq_results: list[Song] = []
+    tasks = []
+    if ncm_source is not None:
+        tasks.append(_search(ncm_source))
+    if qq_source is not None:
+        tasks.append(_search(qq_source))
+    results_list = await asyncio.gather(*tasks)
+    if ncm_source is not None:
+        ncm_results = results_list.pop(0)
+    if qq_source is not None:
+        qq_results = results_list.pop(0) if results_list else []
+
+    # 交替合并，最多 10 条
+    mixed: list[Song] = []
+    max_len = max(len(ncm_results), len(qq_results))
+    for i in range(max_len):
+        if i < len(ncm_results):
+            mixed.append(ncm_results[i])
+        if i < len(qq_results):
+            mixed.append(qq_results[i])
+        if len(mixed) >= 10:
+            break
+
+    if not mixed:
+        await bot.send("网易云和 QQ 音乐都没有找到相关歌曲。")
+        return
+    if len(mixed) == 1:
+        _clear_pending(ev)
+        await _play_song(bot, ev, mixed[0], sources[mixed[0].source], settings.render_quality)
+        return
+
+    try:
+        card = await render_song_card(
+            mixed,
+            title="双源点歌候选",
+            hint=f"回复数字 1～{len(mixed)} 播放对应曲目 · {PENDING_TTL_SECONDS // 60:.0f} 分钟内有效",
+            quality=settings.render_quality,
+        )
+    except (OSError, RuntimeError, httpx.HTTPError) as exc:
+        logger.warning(f"[MomoTune] 渲染双源搜索结果失败: {exc}")
+        await bot.send("渲染搜索结果失败，请稍后再试。")
+        return
+
+    _set_pending(ev, mixed)
+    await bot.send(MessageSegment.image(card))
+    await bot.send(f"回复数字 1～{len(mixed)} 播放对应曲目（{PENDING_TTL_SECONDS // 60:.0f} 分钟内有效）")
+
+
+@music_sv.on_command(
+    MIXED_COMMANDS,
+    block=True,
+    prefix=False,
+)
+async def mixed_song(bot: Bot, ev: Event) -> None:
+    await _handle_mixed_search(bot, ev)
 
 
 def _is_admin(ev: Event) -> bool:
@@ -422,7 +509,7 @@ try:
         capability_domain="音乐播放",
         covers=[
             "网易云音乐点歌与歌曲播放",
-            "酷狗音乐点歌与歌曲播放",
+            # "酷狗音乐点歌与歌曲播放",
             "QQ音乐点歌与歌曲播放",
             "按歌名或歌手播放歌曲音频与卡片",
             "根据用户需求点播音乐",
@@ -431,7 +518,7 @@ try:
             "音乐·点歌",
             "音乐·播放歌曲",
             "音乐·网易云放歌",
-            "音乐·酷狗放歌",
+            # "音乐·酷狗放歌",
             "音乐·QQ音乐放歌",
         ],
         context_tags=["音乐", "点歌", "娱乐"],
@@ -448,7 +535,7 @@ try:
 Args:
     song_name: 歌曲名称或关键词，例如“晴天”、“海阔天空”。若已知网易云歌曲ID也可直接填入数字ID（如“347230”，仅限网易云）。
     artist: 可选，歌手名称，例如“周杰伦”、“陈奕迅”，用于更精准命中。
-    source: 音乐平台源，"ncm"（网易云音乐，默认）、"kugou"（酷狗音乐）或 "qq"（QQ音乐，需管理员扫码登录会员账号）。
+    # source: 音乐平台源，"ncm"（网易云音乐，默认）、"kugou"（酷狗音乐）或 "qq"（QQ音乐，需管理员扫码登录会员账号）。
 
 Returns:
     播放状态说明。若成功，卡片与音频已直接发送给用户；AI 无需再重复发送音频，可直接自然回复用户。
@@ -459,9 +546,9 @@ Returns:
             return "错误：当前会话上下文缺失，无法发送音乐。"
 
         src_lower = source.lower()
-        if src_lower in ("kugou", "kg", "酷狗"):
-            src_name: MusicSource = KUGOU
-        elif src_lower in ("qq", "qqmusic", "tencent", "QQ音乐", "腾讯"):
+        # if src_lower in ("kugou", "kg", "酷狗"):
+            # src_name: MusicSource = KUGOU
+        if src_lower in ("qq", "qqmusic", "tencent", "QQ音乐", "腾讯"):
             src_name = QQ
         else:
             src_name = NCM
@@ -492,7 +579,7 @@ Returns:
             return f"搜索失败：连接{source_obj.label}服务超时或异常，请稍后重试。"
 
         if not results:
-            return f"在{source_obj.label}未找到「{query}」相关的歌曲。建议更换歌名或尝试另一个平台（如 kugou）。"
+            return f"在{source_obj.label}未找到「{query}」相关的歌曲。建议更换歌名或尝试其他平台。"
 
         # 3. 挑选最佳匹配
         best_song = results[0]

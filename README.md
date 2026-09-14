@@ -5,7 +5,7 @@
 </p>
 
 <h1 align="center">MomoTune</h1>
-<h4 align="center">✨ 基于 GsCore 的网易云 / 酷狗 / QQ音乐三源点歌插件 ✨</h4>
+<h4 align="center">✨ 基于 GsCore 的网易云 / QQ音乐双源点歌插件 ✨</h4>
 
 <div align="center">
   <a href="https://github.com/Genshin-bots/gsuid_core">GsCore</a> &nbsp;·&nbsp;
@@ -47,7 +47,13 @@ core重启
 pip install "httpx>=0.27.0" "pytakumi>=0.1.0"
 ~~~
 
-QQ音乐依赖 <code>qqmusic-api-python</code> 已**随插件内置**（位于 <code>_vendor/wheels/</code>，77 个 wheel，支持 Linux x86_64/aarch64 与 Windows x64(AMD64) 上的 CPython 3.11/3.12/3.13）：首次使用 QQ音乐功能时自动按当前解释器选择 wheel 解压到 Core 数据目录 <code>MomoTune/_vendor_lib/</code>，无需联网 pip，系统环境已安装时优先使用系统版本。Windows 上如解压被杀毒软件短暂占用会自动重试。macOS、32 位 / ARM 版 Windows 不在内置矩阵内，请手动执行 <code>pip install "qqmusic-api-python>=0.7.2"</code>。
+QQ音乐依赖 <code>qqmusic-api-python</code> 为可选依赖，**不随插件内置**，启用 QQ 音乐功能前需在 GsCore 所用的同一个 Python 环境中安装：
+
+~~~bash
+pip install "qqmusic-api-python>=0.7.2"
+~~~
+
+安装完成后重启 GsCore 即可。若已开启 GsCore 的自动安装依赖，也可通过 <code>pip install "momo-tune[qqmusic]"</code> 一同安装。
 
 ### 方式二：手动克隆
 
@@ -65,14 +71,18 @@ git clone https://github.com/Xinzhus/MomoTune.git
 | 触发指令 | 功能说明 | 备注 |
 | :--- | :--- | :--- |
 | <code>点歌 晴天</code> | 搜索网易云并展示候选 | <code>唱歌</code>、<code>来一首</code> 是同义指令 |
-| <code>酷狗点歌 花海</code> | 搜索酷狗并展示候选 | <code>酷狗唱歌</code>、<code>酷狗来一首</code> 是同义指令 |
+| ~~<code>酷狗点歌 花海</code>~~ | ~~搜索酷狗并展示候选~~ | 酷狗相关代码已注释，需要时可在源码中取消注释启用 |
 | <code>QQ点歌 晴天</code> | 搜索 QQ音乐并展示候选 | <code>QQ唱歌</code>、<code>QQ来一首</code>、<code>qq点歌</code> 是同义指令 |
+| <code>双源点歌 晴天</code> | 网易云 + QQ音乐并发搜索，各 5 条交替排列共 10 条候选 | <code>合并点歌</code>、<code>综合点歌</code> 是同义指令；网易云未登录时也可使用 |
 | <code>QQ音乐登录 [qq\|wx\|mobile]</code> | 主人/超级用户扫码登录 QQ音乐会员 | 二维码 3 分钟内有效；语音播放必需，支持过期自动刷新 |
 | <code>QQ音乐退出</code> / <code>QQ音乐状态</code> | 清除登录态 / 查看登录状态 | 退出仅主人/超级用户（user_pm 0/1）可用 |
 | <code>1</code> ～ <code>10</code> | 选择候选列表中的歌曲 | 选择状态 5 分钟内有效 |
 | <code>点歌 421423808</code> | 直接播放网易云歌曲 ID | 仅支持纯数字 ID，仅网易云音源 |
 
 搜索到多个结果时，先查看图片卡片，再回复对应数字。插件会发送歌曲信息卡片，并在播放地址可用时发送语音记录。
+
+> [!NOTE]
+> 酷狗音乐相关代码已**注释**（包括命令注册、音源类与配置项），如需启用可在 `momotune_music/sources.py`、`momotune_music/__init__.py` 中找到对应注释块取消注释即可。
 
 <br/>
 

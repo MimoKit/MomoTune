@@ -37,18 +37,14 @@ _credential_loaded = False
 
 
 _DEP_HINT = (
-    "QQ音乐依赖加载失败：系统环境与内置 wheels 均不可用。"
-    "请在 GsCore 使用的 Python 环境执行"
+    "QQ音乐依赖未安装：请在 GsCore 使用的 Python 环境执行"
     "「pip install \"qqmusic-api-python>=0.7.2\"」后重启 Core。"
+    "更多说明见插件 README。"
 )
 
 
 def _load_lib() -> Any:
-    """惰性导入 qqmusic_api。
-
-    优先使用系统环境已安装且兼容的版本；不可用时从随插件内置的 wheels
-    （_vendor）按当前解释器 ABI 解压加载；仍失败则把真实原因反馈给用户。
-    """
+    """惰性导入 qqmusic_api；未安装时抛出带安装说明的 SourceError。"""
     global _lib
     if _lib is not None:
         return _lib
@@ -57,31 +53,12 @@ def _load_lib() -> Any:
         importlib.import_module("qqmusic_api.modules.song")
         _lib = importlib.import_module("qqmusic_api")
         return _lib
-    except Exception:  # noqa: BLE001 - 缺失/版本不兼容都回退到内置 wheels
-        pass
-
-    # 系统环境不可用或不兼容 → 尝试内置 wheels
-    try:
-        from ._vendor.bootstrap import VendorError, ensure_vendor
-    except ImportError as exc:
+    except Exception as exc:  # noqa: BLE001 - 统一提示安装
         raise SourceError(f"{_DEP_HINT}（{type(exc).__name__}: {exc}）") from exc
-
-    try:
-        ensure_vendor()
-        _lib = importlib.import_module("qqmusic_api")
-        importlib.import_module("qqmusic_api.modules.song")
-    except SourceError:
-        raise
-    except VendorError as exc:
-        # bootstrap 给出的已是面向用户的可操作中文提示，原样上抛
-        raise SourceError(str(exc)) from exc
-    except Exception as exc:
-        raise SourceError(f"{_DEP_HINT}（{type(exc).__name__}: {exc}）") from exc
-    return _lib
 
 
 def _mod(name: str) -> Any:
-    """导入 qqmusic_api 子模块；依赖缺失/损坏时统一转为可读提示。"""
+    """导入 qqmusic_api 子模块；依赖缺失时统一转为可读提示。"""
     try:
         _load_lib()
         return importlib.import_module(name)
