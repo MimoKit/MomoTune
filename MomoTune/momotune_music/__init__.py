@@ -361,7 +361,7 @@ async def _wait_qq_login(bot: Bot, client: object, session: object) -> None:
         else:
             await bot.send(f"QQ音乐登录失败：{exc}，请稍后重试。")
     else:
-        await bot.send("QQ音乐会员登录成功，现在可以用「QQ点歌」发送语音了。")
+        await bot.send("QQ音乐会员登录成功，现在可以用「点歌」发送语音了。")
 
 
 @auth_sv.on_command(
