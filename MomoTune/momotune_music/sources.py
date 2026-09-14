@@ -44,9 +44,9 @@ class RenderProfile:
 
 
 QUALITY_PROFILES: dict[str, RenderProfile] = {
-    "default": RenderProfile("default", 96, 15, None, 240, 300),
-    "high": RenderProfile("high", 192, 16, 480, 480, 500),
-    "ultra": RenderProfile("ultra", 288, 15, 512, 480, 800),
+    "default": RenderProfile(key="default", dpi=96, font_size=15, ncm_cover_size=None, qq_cover_size=300),
+    "high": RenderProfile(key="high", dpi=192, font_size=16, ncm_cover_size=480, qq_cover_size=500),
+    "ultra": RenderProfile(key="ultra", dpi=288, font_size=15, ncm_cover_size=512, qq_cover_size=800),
 }
 
 
