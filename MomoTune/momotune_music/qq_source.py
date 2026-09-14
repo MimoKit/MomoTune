@@ -37,20 +37,46 @@ _credential_loaded = False
 
 
 _DEP_HINT = (
-    "QQ音乐功能缺少依赖 qqmusic-api-python，请在 GsCore 使用的 Python 环境执行"
+    "QQ音乐依赖加载失败：系统环境与内置 wheels 均不可用。"
+    "请在 GsCore 使用的 Python 环境执行"
     "「pip install \"qqmusic-api-python>=0.7.2\"」后重启 Core。"
 )
 
 
 def _load_lib() -> Any:
-    """惰性导入 qqmusic_api；未安装时给出可直接执行的提示。"""
+    """惰性导入 qqmusic_api。
+
+    优先使用系统环境已安装且兼容的版本；不可用时从随插件内置的 wheels
+    （_vendor）按当前解释器 ABI 解压加载；仍失败则把真实原因反馈给用户。
+    """
     global _lib
     if _lib is not None:
         return _lib
     try:
+        importlib.import_module("qqmusic_api")
+        importlib.import_module("qqmusic_api.modules.song")
         _lib = importlib.import_module("qqmusic_api")
+        return _lib
+    except Exception:  # noqa: BLE001 - 缺失/版本不兼容都回退到内置 wheels
+        pass
+
+    # 系统环境不可用或不兼容 → 尝试内置 wheels
+    try:
+        from ._vendor.bootstrap import VendorError, ensure_vendor
     except ImportError as exc:
-        raise SourceError(_DEP_HINT) from exc
+        raise SourceError(f"{_DEP_HINT}（{type(exc).__name__}: {exc}）") from exc
+
+    try:
+        ensure_vendor()
+        _lib = importlib.import_module("qqmusic_api")
+        importlib.import_module("qqmusic_api.modules.song")
+    except SourceError:
+        raise
+    except VendorError as exc:
+        # bootstrap 给出的已是面向用户的可操作中文提示，原样上抛
+        raise SourceError(str(exc)) from exc
+    except Exception as exc:
+        raise SourceError(f"{_DEP_HINT}（{type(exc).__name__}: {exc}）") from exc
     return _lib
 
 
@@ -59,8 +85,10 @@ def _mod(name: str) -> Any:
     try:
         _load_lib()
         return importlib.import_module(name)
-    except ImportError as exc:
-        raise SourceError(_DEP_HINT) from exc
+    except SourceError:
+        raise
+    except Exception as exc:
+        raise SourceError(f"{_DEP_HINT}（{type(exc).__name__}: {exc}）") from exc
 
 
 def _load_credential() -> Any | None:
@@ -216,7 +244,7 @@ class QqSource(BaseSource):
         credential = _load_credential()
         if credential is None:
             raise SourceError(
-                "QQ音乐语音播放需要会员登录态，请由超级用户发送「QQ音乐登录」扫码登录后再试。"
+                "QQ音乐语音播放需要会员登录态，请由主人或超级用户发送「QQ音乐登录」扫码登录后再试。"
             )
 
         try:

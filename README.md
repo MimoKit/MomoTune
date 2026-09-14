@@ -44,10 +44,10 @@ core重启
 依赖已经写入 <code>pyproject.toml</code>，开启 GsCore 自动安装依赖即可。若你的 Core 关闭了自动安装，请在 Core 使用的同一个 Python 环境执行：
 
 ~~~bash
-pip install "httpx>=0.27.0" "pytakumi>=0.1.0" "qqmusic-api-python>=0.7.2"
+pip install "httpx>=0.27.0" "pytakumi>=0.1.0"
 ~~~
 
-> 仅使用网易云 / 酷狗时不需要 <code>qqmusic-api-python</code>；QQ音乐音源在首次调用时才惰性加载该库，缺失时只影响 QQ音乐指令并给出安装提示。
+QQ音乐依赖 <code>qqmusic-api-python</code> 已**随插件内置**（位于 <code>_vendor/wheels/</code>，77 个 wheel，支持 Linux x86_64/aarch64 与 Windows x64(AMD64) 上的 CPython 3.11/3.12/3.13）：首次使用 QQ音乐功能时自动按当前解释器选择 wheel 解压到 Core 数据目录 <code>MomoTune/_vendor_lib/</code>，无需联网 pip，系统环境已安装时优先使用系统版本。Windows 上如解压被杀毒软件短暂占用会自动重试。macOS、32 位 / ARM 版 Windows 不在内置矩阵内，请手动执行 <code>pip install "qqmusic-api-python>=0.7.2"</code>。
 
 ### 方式二：手动克隆
 
@@ -67,8 +67,8 @@ git clone https://github.com/Xinzhus/MomoTune.git
 | <code>点歌 晴天</code> | 搜索网易云并展示候选 | <code>唱歌</code>、<code>来一首</code> 是同义指令 |
 | <code>酷狗点歌 花海</code> | 搜索酷狗并展示候选 | <code>酷狗唱歌</code>、<code>酷狗来一首</code> 是同义指令 |
 | <code>QQ点歌 晴天</code> | 搜索 QQ音乐并展示候选 | <code>QQ唱歌</code>、<code>QQ来一首</code>、<code>qq点歌</code> 是同义指令 |
-| <code>QQ音乐登录 [qq\|wx\|mobile]</code> | 超级用户扫码登录 QQ音乐会员 | 二维码 3 分钟内有效；语音播放必需，支持过期自动刷新 |
-| <code>QQ音乐退出</code> / <code>QQ音乐状态</code> | 清除登录态 / 查看登录状态 | 退出仅超级用户可用 |
+| <code>QQ音乐登录 [qq\|wx\|mobile]</code> | 主人/超级用户扫码登录 QQ音乐会员 | 二维码 3 分钟内有效；语音播放必需，支持过期自动刷新 |
+| <code>QQ音乐退出</code> / <code>QQ音乐状态</code> | 清除登录态 / 查看登录状态 | 退出仅主人/超级用户（user_pm 0/1）可用 |
 | <code>1</code> ～ <code>10</code> | 选择候选列表中的歌曲 | 选择状态 5 分钟内有效 |
 | <code>点歌 421423808</code> | 直接播放网易云歌曲 ID | 仅支持纯数字 ID，仅网易云音源 |
 
@@ -79,7 +79,7 @@ git clone https://github.com/Xinzhus/MomoTune.git
 ## 丨功能特色
 
 - **网易云 / 酷狗 / QQ音乐三源**：HTTP 兼容后端（网易云、酷狗）与 QQ音乐官方接口库统一为相同的点歌交互。
-- **QQ音乐会员扫码登录**：超级用户发送「QQ音乐登录」即可在聊天内扫码（QQ / 微信 / QQ音乐 APP），登录态加密保存在 Core 数据目录并自动刷新；登录后可解析 VIP 歌曲语音。
+- **QQ音乐会员扫码登录**：主人（user_pm=0）或超级用户（user_pm=1）发送「QQ音乐登录」即可在聊天内扫码（QQ / 微信 / QQ音乐 APP），登录态加密保存在 Core 数据目录并自动刷新；登录后可解析 VIP 歌曲语音。
 - **候选列表与数字选择**：结果按序号展示，候选状态按机器人、群组和用户隔离，避免串单。
 - **网易云 ID 直达**：输入数字歌曲 ID 时跳过搜索，直接查询详情并播放。
 - **实时封面卡片**：显示歌曲名、歌手、专辑、时长和来源，封面从接口实时取得。
@@ -139,8 +139,10 @@ Cookie 属于敏感凭据，不要写进 README、截图、Issue 或提交信息
 | 提示没有可用播放链接 | 可能是版权或地区限制；尝试其他版本、音源或 Cookie |
 | 封面显示占位图 | 检查 <code>picUrl</code> 是否可访问、证书是否有效、后端是否返回图片地址 |
 | 渲染失败 | 确认 <code>pytakumi</code> 安装在 GsCore 使用的 Python 环境中，然后重启 Core |
-| QQ音乐提示缺少依赖 | 在 Core 的 Python 环境执行 <code>pip install "qqmusic-api-python>=0.7.2"</code> 后重启 |
-| QQ音乐提示需要登录态 | 语音播放必须由超级用户发送「QQ音乐登录」扫码；匿名状态只能看候选卡片 |
+| QQ音乐提示缺少依赖 / <code>_vendor/wheels</code> 缺失 | 说明装的是**精简补丁**（仅文本代码，不含 77 个 wheel）。请改用完整发行包 <code>MomoTune-hd.zip</code> 覆盖整个 MomoTune 目录后重启；也可在 Core 的 Python 环境执行 <code>pip install "qqmusic-api-python>=0.7.2"</code>。错误提示会附带真实异常（如 <code>ImportError</code>/平台信息），反馈问题时请一并提供 |
+| OneBot v11 收不到语音 / 收到的是文件 | 插件始终发送早柚 <code>record</code> 语音段。<b>snowluma_gscore_bridge 2.1.4+</b> 会直调协议端 record API 发送真正的语音气泡（要求 NapCat/Lagrange 等协议端支持 mp3，自动转 silk）；旧版桥接会降级成 mp3 文件，请升级桥接。官方 <code>nonebot-plugin-genshinuid</code> 无 record 分支会直接丢弃语音。另注意桥接 WS 单帧上限 64MB，音频本体限制 40MB |
+| 首次 QQ点歌很慢/占磁盘 | 首次使用需把内置 wheel 解压到数据目录 <code>MomoTune/_vendor_lib/</code>（约数十 MB），仅一次，后续直接复用 |
+| QQ音乐提示需要登录态 | 语音播放必须由主人或超级用户（user_pm 0/1）发送「QQ音乐登录」扫码；匿名状态只能看候选卡片 |
 | QQ音乐提示风控/暂时不可用 | 请求过频触发安全验证，稍等再试，或完成会员登录 |
 | 回复数字无反应 | 必须在同一会话中选择，且搜索结果没有超过 5 分钟有效期 |
 

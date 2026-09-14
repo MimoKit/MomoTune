@@ -3,11 +3,18 @@ name = "momo-tune"
 version = "0.1.0"
 description = "MomoTune 日系二次元风格网易云 / 酷狗 / QQ音乐点歌 GsCore 插件"
 requires-python = ">=3.11"
+# qqmusic-api-python 已随插件内置（wheel 支持 Linux x86_64/aarch64 与
+# Windows x64(AMD64)，CPython 3.11/3.12/3.13，首次使用 QQ音乐时自动解压到
+# Core 数据目录），无需 pip 安装；系统环境已安装时优先使用系统版本。
+# 其他平台（macOS、32位/ARM 版 Windows）可手动安装：
+# pip install "qqmusic-api-python>=0.7.2"
 dependencies = [
     "httpx>=0.27.0",
     "pytakumi>=0.1.0",
-    "qqmusic-api-python>=0.7.2",
 ]
+
+[project.optional-dependencies]
+qqmusic = ["qqmusic-api-python>=0.7.2"]
 
 [tool.gsuid]
 plugin_name = "MomoTune"

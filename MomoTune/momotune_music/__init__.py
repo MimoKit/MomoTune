@@ -170,6 +170,16 @@ def _merge_detail(song: Song, detail: Song | None) -> Song:
     )
 
 
+async def _send_audio(bot: Bot, audio: bytes) -> None:
+    """以语音 record 段发送音频。
+
+    OneBot v11 能否呈现为语音气泡取决于桥接/适配器：snowluma_gscore_bridge
+    （>=2.1.4）会直调协议端 record API 发真语音；不支持 record 段的链路
+    （如官方 nonebot-plugin-genshinuid）会丢弃该段，需升级桥接。
+    """
+    await bot.send(MessageSegment.record(audio))
+
+
 async def _play_song(
     bot: Bot,
     ev: Event,
@@ -215,10 +225,10 @@ async def _play_song(
         audio = await download(play_url)
     except (SourceError, httpx.HTTPError) as exc:
         logger.warning(f"[MomoTune] 下载音频失败 {song.song_id}: {exc}")
-        msg = "下载音频失败，请稍后再试。"
+        msg = f"下载音频失败（{exc}），请稍后再试。"
         await bot.send(msg)
         return False, msg
-    await bot.send(MessageSegment.record(audio))
+    await _send_audio(bot, audio)
     return True, f"《{song.name}》- {song.artist}"
 
 
@@ -307,8 +317,13 @@ async def qq_song(bot: Bot, ev: Event) -> None:
     await _handle_song_request(bot, ev, QQ)
 
 
+def _is_admin(ev: Event) -> bool:
+    """是否为管理员：user_pm 0=主人，1=超级用户。"""
+    return ev.user_pm in (0, 1)
+
+
 async def _wait_qq_login(bot: Bot, client: object, session: object) -> None:
-    """后台等待扫码结果并主动通知（GsCore user_pm==1 为超级用户）。"""
+    """后台等待扫码结果并主动通知。"""
     try:
         await wait_qr_login(client, session)
     except asyncio.TimeoutError:
@@ -331,8 +346,8 @@ async def _wait_qq_login(bot: Bot, client: object, session: object) -> None:
     prefix=False,
 )
 async def qq_login(bot: Bot, ev: Event) -> None:
-    if ev.user_pm != 1:
-        await bot.send("仅超级用户可以登录 QQ音乐会员账号。")
+    if not _is_admin(ev):
+        await bot.send("仅主人或超级用户可以登录 QQ音乐会员账号。")
         return
     login_type = (ev.text.strip().lower() or "qq")
     if login_type not in ("qq", "wx", "mobile"):
@@ -358,8 +373,8 @@ async def qq_login(bot: Bot, ev: Event) -> None:
     prefix=False,
 )
 async def qq_logout(bot: Bot, ev: Event) -> None:
-    if ev.user_pm != 1:
-        await bot.send("仅超级用户可以清除 QQ音乐登录态。")
+    if not _is_admin(ev):
+        await bot.send("仅主人或超级用户可以清除 QQ音乐登录态。")
         return
     qq_clear_credential()
     await bot.send("已清除 QQ音乐登录态。")
@@ -371,7 +386,7 @@ async def qq_logout(bot: Bot, ev: Event) -> None:
     prefix=False,
 )
 async def qq_status(bot: Bot, ev: Event) -> None:
-    status = "已登录会员账号（QQ音乐语音点歌可用）" if qq_has_login() else "未登录（QQ音乐语音点歌需超级用户发送「QQ音乐登录」）"
+    status = "已登录会员账号（QQ音乐语音点歌可用）" if qq_has_login() else "未登录（QQ音乐语音点歌需主人或超级用户发送「QQ音乐登录」）"
     await bot.send(f"MomoTune · QQ音乐状态：{status}。")
 
 
