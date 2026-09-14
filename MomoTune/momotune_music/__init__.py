@@ -234,116 +234,43 @@ async def _play_song(
     return True, f"《{song.name}》- {song.artist}"
 
 
-async def _handle_song_request(bot: Bot, ev: Event, source_name: MusicSource) -> None:
-    settings, sources = _REGISTRY.snapshot()
-    source = sources[source_name]
-    raw = ev.text.strip()
-    command = ev.command or {QQ: "QQ点歌"}.get(source_name, "点歌")
-    if not raw:
-        await bot.send(f"请输入歌名，例如：{command} 晴天")
-        return
-
-    if source_name == NCM and raw.isdigit():
-        _clear_pending(ev)
-        await _play_song(bot, ev, Song(source=NCM, song_id=raw), source, settings.render_quality)
-        return
-
-    try:
-        results = await source.search(raw, settings.search_limit)
-    except SourceError as exc:
-        await bot.send(str(exc))
-        return
-    except httpx.HTTPError as exc:
-        logger.warning(f"[MomoTune] {source.label}搜索失败: {exc}")
-        await bot.send(f"{source.label}搜索「{raw}」失败，请稍后再试。")
-        return
-
-    if not results:
-        await bot.send(f"{source.label}没有找到「{raw}」相关的歌曲。")
-        return
-    if len(results) == 1:
-        _clear_pending(ev)
-        await _play_song(bot, ev, results[0], source, settings.render_quality)
-        return
-
-    try:
-        card = await render_song_card(
-            results,
-            title=f"{source.label}点歌候选",
-            hint=f"回复数字 1～{len(results)} 播放对应曲目 · 选择在 {PENDING_TTL_SECONDS // 60:.0f} 分钟内有效",
-            quality=settings.render_quality,
-        )
-    except (OSError, RuntimeError, httpx.HTTPError) as exc:
-        logger.warning(f"[MomoTune] 渲染搜索结果失败: {exc}")
-        await bot.send("渲染搜索结果失败，请稍后再试。")
-        return
-
-    _set_pending(ev, results)
-    await bot.send(MessageSegment.image(card))
-    await bot.send(f"回复数字 1～{len(results)} 播放对应曲目（{PENDING_TTL_SECONDS // 60:.0f} 分钟内有效）")
-
-
 music_sv = SV("MomoTune点歌", priority=5, area="ALL")
 pick_sv = SV("MomoTune选歌", priority=15, area="ALL")
 auth_sv = SV("MomoTune管理", priority=5, area="ALL")
 
-NCM_COMMANDS = ("点歌", "唱歌", "来一首")
+SONG_COMMANDS = ("点歌", "唱歌", "来一首")
 
 # --- 酷狗命令（已注释） ---
 # KUGOU_COMMANDS = ("酷狗点歌", "酷狗唱歌", "酷狗来一首")
 
-QQ_COMMANDS = ("QQ点歌", "QQ唱歌", "QQ来一首", "qq点歌")
-
-
-@music_sv.on_command(
-    NCM_COMMANDS,
-    block=True,
-    prefix=False,
-)
-async def ncm_song(bot: Bot, ev: Event) -> None:
-    await _handle_song_request(bot, ev, NCM)
-
-
-# --- 酷狗点歌命令（已注释） ---
-# @music_sv.on_command(
-#     KUGOU_COMMANDS,
-#     block=True,
-#     prefix=False,
-# )
-# async def kugou_song(bot: Bot, ev: Event) -> None:
-#     await _handle_song_request(bot, ev, KUGOU)
-
-
-@music_sv.on_command(
-    QQ_COMMANDS,
-    block=True,
-    prefix=False,
-)
-async def qq_song(bot: Bot, ev: Event) -> None:
-    await _handle_song_request(bot, ev, QQ)
-
-
-MIXED_COMMANDS = ("双源点歌", "合并点歌", "综合点歌")
+# --- QQ音乐单源点歌命令已合并进统一的「点歌」指令（网易云 + QQ 双源） ---
+# QQ_COMMANDS = ("QQ点歌", "QQ唱歌", "QQ来一首", "qq点歌")
 
 
 async def _handle_mixed_search(bot: Bot, ev: Event) -> None:
-    """网易云 + QQ 音乐双源并发搜索，各取 5 条交替排列共 10 条候选。"""
+    """统一点歌：网易云 + QQ 音乐并发搜索，各取 5 条交替排列共 10 条候选。"""
     settings, sources = _REGISTRY.snapshot()
     ncm_source = sources.get(NCM)
     qq_source = sources.get(QQ)
     raw = ev.text.strip()
     if not raw:
-        await bot.send("请输入歌名，例如：双源点歌 晴天")
+        await bot.send("请输入歌名，例如：点歌 晴天")
+        return
+
+    # 纯数字 ID：直接按网易云歌曲 ID 播放
+    if ncm_source is not None and raw.isdigit():
+        _clear_pending(ev)
+        await _play_song(bot, ev, Song(source=NCM, song_id=raw), ncm_source, settings.render_quality)
         return
 
     async def _search(src: BaseSource) -> list[Song]:
         try:
             return await src.search(raw, 5)
         except SourceError as exc:
-            logger.warning(f"[MomoTune] {src.label}混合搜索失败: {exc}")
+            logger.warning(f"[MomoTune] {src.label}搜索失败: {exc}")
             return []
         except httpx.HTTPError as exc:
-            logger.warning(f"[MomoTune] {src.label}混合搜索失败: {exc}")
+            logger.warning(f"[MomoTune] {src.label}搜索失败: {exc}")
             return []
 
     ncm_results: list[Song] = []
@@ -371,7 +298,7 @@ async def _handle_mixed_search(bot: Bot, ev: Event) -> None:
             break
 
     if not mixed:
-        await bot.send("网易云和 QQ 音乐都没有找到相关歌曲。")
+        await bot.send("网易云和 QQ 音乐都没有找到相关歌曲，请更换关键词。")
         return
     if len(mixed) == 1:
         _clear_pending(ev)
@@ -381,12 +308,12 @@ async def _handle_mixed_search(bot: Bot, ev: Event) -> None:
     try:
         card = await render_song_card(
             mixed,
-            title="双源点歌候选",
+            title="点歌候选",
             hint=f"回复数字 1～{len(mixed)} 播放对应曲目 · {PENDING_TTL_SECONDS // 60:.0f} 分钟内有效",
             quality=settings.render_quality,
         )
     except (OSError, RuntimeError, httpx.HTTPError) as exc:
-        logger.warning(f"[MomoTune] 渲染双源搜索结果失败: {exc}")
+        logger.warning(f"[MomoTune] 渲染搜索结果失败: {exc}")
         await bot.send("渲染搜索结果失败，请稍后再试。")
         return
 
@@ -396,12 +323,22 @@ async def _handle_mixed_search(bot: Bot, ev: Event) -> None:
 
 
 @music_sv.on_command(
-    MIXED_COMMANDS,
+    SONG_COMMANDS,
     block=True,
     prefix=False,
 )
-async def mixed_song(bot: Bot, ev: Event) -> None:
+async def search_song(bot: Bot, ev: Event) -> None:
     await _handle_mixed_search(bot, ev)
+
+
+# --- 酷狗点歌命令（已注释） ---
+# @music_sv.on_command(
+#     KUGOU_COMMANDS,
+#     block=True,
+#     prefix=False,
+# )
+# async def kugou_song(bot: Bot, ev: Event) -> None:
+#     await _handle_song_request(bot, ev, KUGOU)
 
 
 def _is_admin(ev: Event) -> bool:
