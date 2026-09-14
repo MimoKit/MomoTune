@@ -5,7 +5,7 @@
 </p>
 
 <h1 align="center">MomoTune</h1>
-<h4 align="center">✨ 基于 GsCore 的网易云 / 酷狗双源点歌插件 ✨</h4>
+<h4 align="center">✨ 基于 GsCore 的网易云 / 酷狗 / QQ音乐三源点歌插件 ✨</h4>
 
 <div align="center">
   <a href="https://github.com/Genshin-bots/gsuid_core">GsCore</a> &nbsp;·&nbsp;
@@ -47,6 +47,8 @@ core重启
 pip install "httpx>=0.27.0" "pytakumi>=0.1.0"
 ~~~
 
+QQ音乐依赖 <code>qqmusic-api-python</code> 已**随插件内置**（位于 <code>_vendor/wheels/</code>，77 个 wheel，支持 Linux x86_64/aarch64 与 Windows x64(AMD64) 上的 CPython 3.11/3.12/3.13）：首次使用 QQ音乐功能时自动按当前解释器选择 wheel 解压到 Core 数据目录 <code>MomoTune/_vendor_lib/</code>，无需联网 pip，系统环境已安装时优先使用系统版本。Windows 上如解压被杀毒软件短暂占用会自动重试。macOS、32 位 / ARM 版 Windows 不在内置矩阵内，请手动执行 <code>pip install "qqmusic-api-python>=0.7.2"</code>。
+
 ### 方式二：手动克隆
 
 ~~~bash
@@ -64,8 +66,11 @@ git clone https://github.com/Xinzhus/MomoTune.git
 | :--- | :--- | :--- |
 | <code>点歌 晴天</code> | 搜索网易云并展示候选 | <code>唱歌</code>、<code>来一首</code> 是同义指令 |
 | <code>酷狗点歌 花海</code> | 搜索酷狗并展示候选 | <code>酷狗唱歌</code>、<code>酷狗来一首</code> 是同义指令 |
+| <code>QQ点歌 晴天</code> | 搜索 QQ音乐并展示候选 | <code>QQ唱歌</code>、<code>QQ来一首</code>、<code>qq点歌</code> 是同义指令 |
+| <code>QQ音乐登录 [qq\|wx\|mobile]</code> | 主人/超级用户扫码登录 QQ音乐会员 | 二维码 3 分钟内有效；语音播放必需，支持过期自动刷新 |
+| <code>QQ音乐退出</code> / <code>QQ音乐状态</code> | 清除登录态 / 查看登录状态 | 退出仅主人/超级用户（user_pm 0/1）可用 |
 | <code>1</code> ～ <code>10</code> | 选择候选列表中的歌曲 | 选择状态 5 分钟内有效 |
-| <code>点歌 421423808</code> | 直接播放网易云歌曲 ID | 仅支持纯数字 ID |
+| <code>点歌 421423808</code> | 直接播放网易云歌曲 ID | 仅支持纯数字 ID，仅网易云音源 |
 
 搜索到多个结果时，先查看图片卡片，再回复对应数字。插件会发送歌曲信息卡片，并在播放地址可用时发送语音记录。
 
@@ -73,7 +78,8 @@ git clone https://github.com/Xinzhus/MomoTune.git
 
 ## 丨功能特色
 
-- **网易云 / 酷狗双源**：两套后端统一为相同的点歌交互。
+- **网易云 / 酷狗 / QQ音乐三源**：HTTP 兼容后端（网易云、酷狗）与 QQ音乐官方接口库统一为相同的点歌交互。
+- **QQ音乐会员扫码登录**：主人（user_pm=0）或超级用户（user_pm=1）发送「QQ音乐登录」即可在聊天内扫码（QQ / 微信 / QQ音乐 APP），登录态加密保存在 Core 数据目录并自动刷新；登录后可解析 VIP 歌曲语音。
 - **候选列表与数字选择**：结果按序号展示，候选状态按机器人、群组和用户隔离，避免串单。
 - **网易云 ID 直达**：输入数字歌曲 ID 时跳过搜索，直接查询详情并播放。
 - **实时封面卡片**：显示歌曲名、歌手、专辑、时长和来源，封面从接口实时取得。
@@ -106,6 +112,9 @@ git clone https://github.com/Xinzhus/MomoTune.git
 | <code>ncm_quality</code> | <code>exhigh</code> | 网易云音质等级，酷狗会自动映射 |
 | <code>ncm_cookie</code> | 空 | 可选的网易云 Cookie |
 | <code>ncm_kugou_cookie</code> | 空 | 可选的酷狗 Cookie |
+| <code>render_quality</code> | <code>default</code> | 卡片渲染清晰度：<code>default</code>（96DPI/封面240~300px）、<code>high</code>（192DPI 2倍图/封面480~500px）、<code>ultra</code>（288DPI 3倍图/封面最高800px，列表卡约4.5MB以内，渲染开销明显增加） |
+
+QQ音乐音源没有 API 地址与 Cookie 配置项：它直接调用 <code>qqmusic-api-python</code> 库，会员凭据通过「QQ音乐登录」扫码获得，保存在 GsCore 数据目录的 <code>MomoTune/qqmusic_credential.json</code>。音质沿用 <code>ncm_quality</code>（standard→128kbps，higher/exhigh→320kbps，lossless/hires→FLAC，高音质不可用时自动降级）。
 
 Cookie 属于敏感凭据，不要写进 README、截图、Issue 或提交信息。建议只在 WebConsole 的秘密配置项中填写；如果发生泄露，请立即失效并重新获取。
 
@@ -130,6 +139,11 @@ Cookie 属于敏感凭据，不要写进 README、截图、Issue 或提交信息
 | 提示没有可用播放链接 | 可能是版权或地区限制；尝试其他版本、音源或 Cookie |
 | 封面显示占位图 | 检查 <code>picUrl</code> 是否可访问、证书是否有效、后端是否返回图片地址 |
 | 渲染失败 | 确认 <code>pytakumi</code> 安装在 GsCore 使用的 Python 环境中，然后重启 Core |
+| QQ音乐提示缺少依赖 / <code>_vendor/wheels</code> 缺失 | 说明装的是**精简补丁**（仅文本代码，不含 77 个 wheel）。请改用完整发行包 <code>MomoTune-hd.zip</code> 覆盖整个 MomoTune 目录后重启；也可在 Core 的 Python 环境执行 <code>pip install "qqmusic-api-python>=0.7.2"</code>。错误提示会附带真实异常（如 <code>ImportError</code>/平台信息），反馈问题时请一并提供 |
+| OneBot v11 收不到语音 / 收到的是文件 | 插件始终发送早柚 <code>record</code> 语音段。<b>snowluma_gscore_bridge 2.1.4+</b> 会直调协议端 record API 发送真正的语音气泡（要求 NapCat/Lagrange 等协议端支持 mp3，自动转 silk）；旧版桥接会降级成 mp3 文件，请升级桥接。官方 <code>nonebot-plugin-genshinuid</code> 无 record 分支会直接丢弃语音。另注意桥接 WS 单帧上限 64MB，音频本体限制 40MB |
+| 首次 QQ点歌很慢/占磁盘 | 首次使用需把内置 wheel 解压到数据目录 <code>MomoTune/_vendor_lib/</code>（约数十 MB），仅一次，后续直接复用 |
+| QQ音乐提示需要登录态 | 语音播放必须由主人或超级用户（user_pm 0/1）发送「QQ音乐登录」扫码；匿名状态只能看候选卡片 |
+| QQ音乐提示风控/暂时不可用 | 请求过频触发安全验证，稍等再试，或完成会员登录 |
 | 回复数字无反应 | 必须在同一会话中选择，且搜索结果没有超过 5 分钟有效期 |
 
 <br/>
@@ -141,7 +155,7 @@ Cookie 属于敏感凭据，不要写进 README、截图、Issue 或提交信息
 ~~~text
 MomoTune/
 ├── MomoTune/                 # GsCore 插件本体
-│   ├── momotune_music/       # 搜索、选择、播放、渲染
+│   ├── momotune_music/       # 搜索、选择、播放、渲染（sources.py 网易云/酷狗，qq_source.py QQ音乐）
 │   ├── momotune_config/      # WebConsole 配置
 │   └── __init__.py
 ├── templates/search_list.html
@@ -158,6 +172,7 @@ MomoTune/
 
 - [GsCore / gsuid_core](https://github.com/Genshin-bots/gsuid_core)：插件运行时、触发器和消息收发。
 - [pytakumi](https://github.com/KimigaiiWuyi/pytakumi)：HTML 卡片渲染引擎。
+- [qqmusic-api-python](https://github.com/L-1124/QQMusicApi)：QQ音乐搜索、会员凭据与播放链接解析。
 - 网易云 / 酷狗兼容后端：提供搜索、封面与播放信息。
 
 本项目仅供学习与交流使用。使用音源、转发或播放歌曲时产生的版权与合规责任由部署者自行承担。

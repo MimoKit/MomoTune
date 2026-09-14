@@ -10,15 +10,15 @@ import httpx
 
 from gsuid_core.logger import logger
 
-MusicSource = Literal["ncm", "kugou"]
+MusicSource = Literal["ncm", "kugou", "qq"]
 JsonObject = dict[str, object]
 
 NCM: MusicSource = "ncm"
 KUGOU: MusicSource = "kugou"
-SOURCE_LABELS: dict[MusicSource, str] = {NCM: "网易云", KUGOU: "酷狗"}
+QQ: MusicSource = "qq"
+SOURCE_LABELS: dict[MusicSource, str] = {NCM: "网易云", KUGOU: "酷狗", QQ: "QQ音乐"}
 
 HTTP_TIMEOUT = 12.0
-DOWNLOAD_MAX_BYTES = 15 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +26,7 @@ class RenderProfile:
     """卡片渲染清晰度档位。
 
     ncm_cover_size 为 None 时保持接口原始封面 URL，不追加尺寸参数。
+    qq_cover_size 仅可取 qqmusic cover_url 支持的 150/300/500/800/1200/1500。
     """
 
     key: str
@@ -33,12 +34,13 @@ class RenderProfile:
     font_size: int
     ncm_cover_size: int | None
     kugou_cover_size: int
+    qq_cover_size: int  # qqmusic cover_url 支持 150/300/500/800/1200/1500
 
 
 QUALITY_PROFILES: dict[str, RenderProfile] = {
-    "default": RenderProfile("default", dpi=96, font_size=15, ncm_cover_size=None, kugou_cover_size=240),
-    "high": RenderProfile("high", dpi=192, font_size=16, ncm_cover_size=480, kugou_cover_size=480),
-    "ultra": RenderProfile("ultra", dpi=288, font_size=15, ncm_cover_size=512, kugou_cover_size=480),
+    "default": RenderProfile("default", 96, 15, None, 240, 300),
+    "high": RenderProfile("high", 192, 16, 480, 480, 500),
+    "ultra": RenderProfile("ultra", 288, 15, 512, 480, 800),
 }
 
 
@@ -351,9 +353,20 @@ class KugouSource(BaseSource):
         return None
 
 
-async def download(url: str) -> bytes:
+# 注意：snowluma gscore 桥接 WS 单帧上限 64MB，GsCore 媒体以 base64 承载（膨胀 4/3），
+# 故音频本体上限取 40MB（base64 后约 53MB），超限会撑爆 WS 帧导致整条消息失败。
+AUDIO_TIMEOUT = 60.0
+AUDIO_MAX_BYTES = 40 * 1024 * 1024
+
+
+async def download(
+    url: str,
+    *,
+    timeout: float = AUDIO_TIMEOUT,
+    max_bytes: int = AUDIO_MAX_BYTES,
+) -> bytes:
     """下载音频，限制最大体积，避免异常响应耗尽内存。"""
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         async with client.stream("GET", url) as response:
             if response.status_code >= 400:
                 raise SourceError(f"音频下载失败（HTTP {response.status_code}）。")
@@ -361,7 +374,7 @@ async def download(url: str) -> bytes:
             total = 0
             async for chunk in response.aiter_bytes():
                 total += len(chunk)
-                if total > DOWNLOAD_MAX_BYTES:
-                    raise SourceError("音频文件超过 15 MB 大小限制。")
+                if total > max_bytes:
+                    raise SourceError(f"音频文件超过 {max_bytes // (1024 * 1024)} MB 大小限制。")
                 chunks.append(chunk)
             return b"".join(chunks)
