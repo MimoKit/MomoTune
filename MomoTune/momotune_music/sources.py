@@ -18,7 +18,11 @@ NCM: MusicSource = "ncm"
 # === 酷狗音乐功能已注释 ===
 # KUGOU: MusicSource = "kugou"
 QQ: MusicSource = "qq"
-SOURCE_LABELS: dict[MusicSource, str] = {NCM: "网易云", KUGOU: "酷狗", QQ: "QQ音乐"}
+SOURCE_LABELS: dict[MusicSource, str] = {
+    NCM: "网易云",
+    # KUGOU: "酷狗",
+    QQ: "QQ音乐",
+}
 
 HTTP_TIMEOUT = 12.0
 
