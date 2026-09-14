@@ -282,12 +282,12 @@ def ensure_vendor() -> list[str]:
     if need_extract:
         manifest_path.write_text(json.dumps(selected, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 补缺模式再探；仍失败说明系统里有版本不兼容的同名包在遮蔽 vendor
-    exc = _try_probe()
-    if exc is None:
-        return vendor_dirs
-
+    # 内置 wheels 需要整体优先于系统包，避免系统旧版 typing_extensions 等
+    # 先被导入后把不兼容模块留在 sys.modules 中。
     _promote_paths(vendor_dirs)
+    for name in list(sys.modules):
+        if name == "typing_extensions" or name.startswith(("pydantic", "qqmusic_api")):
+            sys.modules.pop(name, None)
     exc = _try_probe()
     if exc is None:
         return vendor_dirs
