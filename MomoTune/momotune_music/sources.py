@@ -14,9 +14,15 @@ MusicSource = Literal["ncm", "kugou", "qq"]
 JsonObject = dict[str, object]
 
 NCM: MusicSource = "ncm"
-KUGOU: MusicSource = "kugou"
+
+# === 酷狗音乐功能已注释 ===
+# KUGOU: MusicSource = "kugou"
 QQ: MusicSource = "qq"
-SOURCE_LABELS: dict[MusicSource, str] = {NCM: "网易云", KUGOU: "酷狗", QQ: "QQ音乐"}
+SOURCE_LABELS: dict[MusicSource, str] = {
+    NCM: "网易云",
+    # KUGOU: "酷狗",
+    QQ: "QQ音乐",
+}
 
 HTTP_TIMEOUT = 12.0
 
@@ -33,14 +39,14 @@ class RenderProfile:
     dpi: int
     font_size: int
     ncm_cover_size: int | None
-    kugou_cover_size: int
+    # kugou_cover_size: int
     qq_cover_size: int  # qqmusic cover_url 支持 150/300/500/800/1200/1500
 
 
 QUALITY_PROFILES: dict[str, RenderProfile] = {
-    "default": RenderProfile("default", 96, 15, None, 240, 300),
-    "high": RenderProfile("high", 192, 16, 480, 480, 500),
-    "ultra": RenderProfile("ultra", 288, 15, 512, 480, 800),
+    "default": RenderProfile(key="default", dpi=96, font_size=15, ncm_cover_size=None, qq_cover_size=300),
+    "high": RenderProfile(key="high", dpi=192, font_size=16, ncm_cover_size=480, qq_cover_size=500),
+    "ultra": RenderProfile(key="ultra", dpi=288, font_size=15, ncm_cover_size=512, qq_cover_size=800),
 }
 
 
@@ -49,16 +55,18 @@ def get_render_profile(key: str) -> RenderProfile:
     return profile if profile is not None else QUALITY_PROFILES["default"]
 
 
-_NCM_TO_KUGOU_QUALITY: dict[str, str] = {
-    "standard": "128",
-    "higher": "320",
-    "exhigh": "320",
-    "lossless": "flac",
-    "hires": "high",
-    "jyeffect": "320",
-    "sky": "high",
-    "jymaster": "high",
-}
+
+# --- 酷狗音质映射（已注释） ---
+# _NCM_TO_KUGOU_QUALITY: dict[str, str] = {
+    # "standard": "128",
+    # "higher": "320",
+    # "exhigh": "320",
+    # "lossless": "flac",
+    # "hires": "high",
+    # "jyeffect": "320",
+    # "sky": "high",
+    # "jymaster": "high",
+# }
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,109 +259,114 @@ class NcmSource(BaseSource):
         return url or None
 
 
-class KugouSource(BaseSource):
-    name = KUGOU
-
-    def __init__(self, base: str, cookie: str, quality: str, cover_size: int | None = None) -> None:
-        super().__init__(base, cookie, quality, cover_size)
-        self._dfid: str | None = None
-        self._dfid_lock = asyncio.Lock()
-
-    @property
-    def _kugou_quality(self) -> str:
-        if self.quality in _NCM_TO_KUGOU_QUALITY:
-            return _NCM_TO_KUGOU_QUALITY[self.quality]
-        return "320"
-
-    async def _ensure_dfid(self) -> None:
-        if self._dfid:
-            return
-        async with self._dfid_lock:
-            if self._dfid:
-                return
-            payload = await self._get("/register/dev")
-            data_value = _field(payload, "data")
-            if not isinstance(data_value, dict):
-                return
-            data = _object(data_value, "酷狗设备注册数据格式异常。")
-            dfid = _text(_first(data, "dfid", "dfid_new"))
-            if dfid:
-                self._dfid = dfid
-
-    @staticmethod
-    def _clean(value: object | None) -> str:
-        return _text(value).replace("<em>", "").replace("</em>", "").strip()
-
-    def _parse(self, raw: object) -> Song | None:
-        if not isinstance(raw, dict):
-            return None
-        data = _object(raw, "酷狗歌曲数据格式异常。")
-        song_hash = _first(data, "FileHash", "hash", "Hash")
-        if song_hash is None:
-            return None
-        seconds = _first(data, "Duration", "duration")
-        pic = self._clean(_first(data, "Image", "sizable_cover", "img"))
-        if pic:
-            pic = pic.replace("{size}", str(self.cover_size or 240))
-        extra: dict[str, str] = {}
-        album_id = _text(_first(data, "AlbumID", "album_id"))
-        album_audio_id = _text(_first(data, "album_audio_id", "AlbumAudioID", "mixsongid"))
-        if album_id:
-            extra["album_id"] = album_id
-        if album_audio_id:
-            extra["album_audio_id"] = album_audio_id
-        return _song(
-            KUGOU,
-            song_hash,
-            self._clean(_first(data, "SongName", "OriSongName", "filename")),
-            self._clean(_first(data, "SingerName", "singername")),
-            self._clean(_first(data, "AlbumName", "albumname")),
-            pic,
-            (_integer(seconds) or 0) * 1000,
-            extra,
-        )
-
-    async def search(self, keyword: str, limit: int) -> list[Song]:
-        payload = await self._get("/search", keywords=keyword, pagesize=limit, type="song")
-        if _integer(_field(payload, "error_code")) == 152:
-            raise SourceError("酷狗接口需要登录凭据，请在 NCM-plugin 后端配置酷狗 cookie。")
-        data_value = _field(payload, "data")
-        data = _object(data_value, "酷狗搜索结果格式异常。") if isinstance(data_value, dict) else {}
-        lists = _first(data, "lists", "info")
-        if not isinstance(lists, list):
-            return []
-        return [song for raw in lists if (song := self._parse(raw)) is not None][:limit]
-
-    async def play_url(self, song: Song) -> str | None:
-        await self._ensure_dfid()
-        payload = await self._get(
-            "/song/url",
-            hash=song.song_id,
-            quality=self._kugou_quality,
-            album_id=song.extra["album_id"] if "album_id" in song.extra else "",
-            album_audio_id=(
-                song.extra["album_audio_id"] if "album_audio_id" in song.extra else ""
-            ),
-        )
-        for key in ("url", "backupUrl"):
-            value = _field(payload, key)
-            if isinstance(value, list) and value:
-                return _text(value[0]) or None
-            if isinstance(value, str) and value:
-                return value
-        data_value = _field(payload, "data")
-        if isinstance(data_value, dict):
-            data = _object(data_value, "酷狗播放链接格式异常。")
-            for key in ("url", "play_url", "backupUrl"):
-                value = _field(data, key)
-                if isinstance(value, list) and value:
-                    return _text(value[0]) or None
-                if isinstance(value, str) and value:
-                    return value
-        return None
 
 
-# 注意：snowluma gscore 桥接 WS 单帧上限 64MB，GsCore 媒体以 base64 承载（膨胀 4/3），
+# ============================
+# 酷狗音源类（已注释）
+# ============================
+# class KugouSource(BaseSource):
+    # name = KUGOU
+
+#     # def __init__(self, base: str, cookie: str, quality: str, cover_size: int | None = None) -> None:
+        # super().__init__(base, cookie, quality, cover_size)
+        # self._dfid: str | None = None
+        # self._dfid_lock = asyncio.Lock()
+
+#     # @property
+    # def _kugou_quality(self) -> str:
+        # if self.quality in _NCM_TO_KUGOU_QUALITY:
+            # return _NCM_TO_KUGOU_QUALITY[self.quality]
+        # return "320"
+
+#     # async def _ensure_dfid(self) -> None:
+        # if self._dfid:
+            # return
+        # async with self._dfid_lock:
+            # if self._dfid:
+                # return
+            # payload = await self._get("/register/dev")
+            # data_value = _field(payload, "data")
+            # if not isinstance(data_value, dict):
+                # return
+            # data = _object(data_value, "酷狗设备注册数据格式异常。")
+            # dfid = _text(_first(data, "dfid", "dfid_new"))
+            # if dfid:
+                # self._dfid = dfid
+
+#     # @staticmethod
+    # def _clean(value: object | None) -> str:
+        # return _text(value).replace("<em>", "").replace("</em>", "").strip()
+
+#     # def _parse(self, raw: object) -> Song | None:
+        # if not isinstance(raw, dict):
+            # return None
+        # data = _object(raw, "酷狗歌曲数据格式异常。")
+        # song_hash = _first(data, "FileHash", "hash", "Hash")
+        # if song_hash is None:
+            # return None
+        # seconds = _first(data, "Duration", "duration")
+        # pic = self._clean(_first(data, "Image", "sizable_cover", "img"))
+        # if pic:
+            # pic = pic.replace("{size}", str(self.cover_size or 240))
+        # extra: dict[str, str] = {}
+        # album_id = _text(_first(data, "AlbumID", "album_id"))
+        # album_audio_id = _text(_first(data, "album_audio_id", "AlbumAudioID", "mixsongid"))
+        # if album_id:
+            # extra["album_id"] = album_id
+        # if album_audio_id:
+            # extra["album_audio_id"] = album_audio_id
+        # return _song(
+            # KUGOU,
+            # song_hash,
+            # self._clean(_first(data, "SongName", "OriSongName", "filename")),
+            # self._clean(_first(data, "SingerName", "singername")),
+            # self._clean(_first(data, "AlbumName", "albumname")),
+            # pic,
+            # (_integer(seconds) or 0) * 1000,
+            # extra,
+        # )
+
+#     # async def search(self, keyword: str, limit: int) -> list[Song]:
+        # payload = await self._get("/search", keywords=keyword, pagesize=limit, type="song")
+        # if _integer(_field(payload, "error_code")) == 152:
+            # raise SourceError("酷狗接口需要登录凭据，请在 NCM-plugin 后端配置酷狗 cookie。")
+        # data_value = _field(payload, "data")
+        # data = _object(data_value, "酷狗搜索结果格式异常。") if isinstance(data_value, dict) else {}
+        # lists = _first(data, "lists", "info")
+        # if not isinstance(lists, list):
+            # return []
+        # return [song for raw in lists if (song := self._parse(raw)) is not None][:limit]
+
+#     # async def play_url(self, song: Song) -> str | None:
+        # await self._ensure_dfid()
+        # payload = await self._get(
+            # "/song/url",
+            # hash=song.song_id,
+            # quality=self._kugou_quality,
+            # album_id=song.extra["album_id"] if "album_id" in song.extra else "",
+            # album_audio_id=(
+                # song.extra["album_audio_id"] if "album_audio_id" in song.extra else ""
+            # ),
+        # )
+        # for key in ("url", "backupUrl"):
+            # value = _field(payload, key)
+            # if isinstance(value, list) and value:
+                # return _text(value[0]) or None
+            # if isinstance(value, str) and value:
+                # return value
+        # data_value = _field(payload, "data")
+        # if isinstance(data_value, dict):
+            # data = _object(data_value, "酷狗播放链接格式异常。")
+            # for key in ("url", "play_url", "backupUrl"):
+                # value = _field(data, key)
+                # if isinstance(value, list) and value:
+                    # return _text(value[0]) or None
+                # if isinstance(value, str) and value:
+                    # return value
+        # return None
+
+# 
+# # 注意：snowluma gscore 桥接 WS 单帧上限 64MB，GsCore 媒体以 base64 承载（膨胀 4/3），
 # 故音频本体上限取 40MB（base64 后约 53MB），超限会撑爆 WS 帧导致整条消息失败。
 AUDIO_TIMEOUT = 60.0
 AUDIO_MAX_BYTES = 40 * 1024 * 1024
